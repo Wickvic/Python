@@ -1,0 +1,78 @@
+
+import tkinter as tk
+from tkinter import ttk
+from PIL import ImageTk, Image
+import os
+import subprocess
+
+# Función para ejecutar el archivo GAF.py
+def ejecutar_gaf():
+    subprocess.call(['python', './GAF.py'])
+
+# Función para ejecutar el archivo UK.py
+def ejecutar_uk():
+    subprocess.call(['python', './UK.py'])
+
+# Función para ejecutar el archivo Input GAF.py
+def ejecutar_INgaf():
+    subprocess.call(['python', './Input GAF.py'])
+
+# Función para ejecutar el archivo Input UK.py
+def ejecutar_INuk():
+    subprocess.call(['python', './Input UK.py'])
+
+# Función para ejecutar el archivo carga.py
+def ejecutar_Hgaf():
+    archivoH='./GAF.xlsx'
+    subprocess.call(['python', './Historico.py', archivoH])
+
+# Función para ejecutar el archivo UK.py
+def ejecutar_Huk():
+    archivoH = './UK.xlsx'
+    subprocess.call(['python', './Historico.py', archivoH])
+
+# Crear la ventana del dashboard
+ventana = tk.Tk()
+ventana.title("DASHBOARD INPUTS BOM")
+
+# Cargar la imagen de fondo
+ruta_imagen = "./FBOM.jpg"
+imagen_fondo = Image.open(ruta_imagen)
+imagen_fondo = imagen_fondo.resize((ventana.winfo_screenwidth(), ventana.winfo_screenheight()), Image.Resampling.LANCZOS)
+fondo = ImageTk.PhotoImage(imagen_fondo)
+
+# Crear un widget de etiqueta para mostrar el fondo
+fondo_label = tk.Label(ventana, image=fondo)
+fondo_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+# Establecer el estilo 'clam' para redondear los bordes de los botones
+s = ttk.Style()
+
+# Cargar la imagen de fondo del botón
+imagen_boton = Image.open(ruta_imagen)
+
+# Cambiar el color del texto y la fuente de los botones
+s.configure('vista', foreground='red', font=("Calibri", 12))
+
+# Colocar los botones
+boton_gaf = ttk.Button(ventana, text="Preparación INPUT GAF", command=ejecutar_gaf)
+boton_gaf.grid(row=0, column=0, padx=85, pady=40)
+
+boton_uk = ttk.Button(ventana, text="Preparación INPUT UK", command=ejecutar_uk)
+boton_uk.grid(row=0, column=1, padx=85, pady=40)
+
+boton_inGAF = ttk.Button(ventana, text="INPUT GAF", command=ejecutar_INgaf)
+boton_inGAF.grid(row=1,column=0,padx=85,pady=40)
+
+boton_inUK = ttk.Button(ventana,text="INPUT UK",command=ejecutar_INuk)
+boton_inUK.grid(row=1,column=1,padx=85,pady=40)
+
+boton_HisGAF = ttk.Button(ventana,text="Historico GAF",command=ejecutar_Hgaf)
+boton_HisGAF.grid(row=2,column=0,padx=85,pady=40)
+
+boton_HisUK = ttk.Button(ventana,text="Historico UK",command=ejecutar_Huk)
+boton_HisUK.grid(row=2,column=1,padx=85,pady=40)
+
+# Ejecutar el loop principal de la ventana
+ventana.mainloop()
+print('Proceso realizado correctamente')
