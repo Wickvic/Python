@@ -1,0 +1,631 @@
+import numpy as np
+import pandas as pd
+import os
+from tqdm import tqdm
+import sqlite3
+
+# CARGA DE ARCHIVOS /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+# Crear una conexión a la base de datos SQLite
+conn = sqlite3.connect('transacciones/Transacciones.db')
+
+# Cargar los datos desde la base de datos SQLite en DataFrames
+df_LTA = pd.read_sql_query("SELECT * FROM ML", conn)
+df_MRTT = pd.read_sql_query("SELECT * FROM MRTT", conn)
+df_A400M = pd.read_sql_query("SELECT * FROM A400M", conn)
+df_coberturas = pd.read_sql_query("SELECT * FROM Coberturas", conn)
+df_roturas = pd.read_sql_query("SELECT * FROM Roturas", conn)
+df_retraso_po = pd.read_sql_query("SELECT * FROM Solicitudes", conn)
+df_TGR = pd.read_sql_query("SELECT * FROM TGR", conn)
+df_entregas = pd.read_sql_query("SELECT * FROM Entregas", conn)
+df_mtsmto= pd.read_sql_query("SELECT * FROM MTSMTO", conn)
+df_mtsdesa= pd.read_sql_query("SELECT * FROM MTSdesalineados", conn)
+#df_categorias= pd.read_sql_query("SELECT * FROM Categorias", conn)
+df_PartMaster= pd.read_sql_query("SELECT * FROM IPCSDD_PART_MASTER", conn)
+df_supplier = pd.read_sql_query("SELECT * FROM supplier", conn)
+df_inc_consumo=pd.read_sql_query("SELECT * FROM Incremento_Consumo", conn)
+df_MB51= pd.read_sql_query("SELECT * FROM MB51", conn)
+# Cerrar la conexión a la base de datos
+conn.close()
+
+
+# Obtener la ruta actual
+proyecto_path = os.getcwd()
+# Obtener la ruta de la carpeta "transacciones" dentro de la carpeta del proyecto
+transacciones_path = os.path.join(proyecto_path, "transacciones")
+# nombre de archivo
+file_names = 'Categorias.xlsx'
+file_path = os.path.join(transacciones_path, file_names)
+df_categorias = pd.read_excel(file_path)
+
+dicINC = df_inc_consumo.set_index('Material')[['Ctd.en UM entrada', 'Fe.contabilización']].to_dict(orient='dict')
+dicMB51 = df_MB51.set_index('Material')[['Clase de movimiento', 'Lote', 'Stock especial']].to_dict(orient='dict')
+dictPML = df_PartMaster.set_index('PartNumber')[['PartDescription','HostPartFamilyID','PartProcurable', 'PartCustom6']].to_dict(orient='dict')
+
+dictTGR = df_TGR.set_index('Material')['TiempoGlobalReaprov'].to_dict()
+df_coberturas['TGR'] = df_coberturas['Material'].map(dictTGR)
+
+df_retraso_po["Concatenar Doc/Pos"] = df_retraso_po.iloc[:,0].astype(str) + df_retraso_po.iloc[:,1].astype(str)
+df_retraso_po['Identificación solped sin pedido'] = df_retraso_po['Doc.compr.'].apply(lambda x: "VERDADERO" if pd.isna(x) else "FALSO")
+
+def concat_col(row):
+    if pd.isna(row["Pos."]):
+        return row["Fe.sol."]
+    else:
+        return str(row["Pos."]) + row["Sol.pedido"]
+
+# Agregar la columna nueva al df_retraso_po utilizando apply
+df_retraso_po["Conc"] = df_retraso_po.apply(concat_col, axis=1)
+
+#Reordenar DataFrame
+df_retraso_po = df_retraso_po.reindex(columns=['Conc', 'Doc.compr.', 'Pos.', 'Sol.pedido', 'Fe.sol.', 'Identificación solped sin pedido', 'Concatenar Doc/Pos'])
+
+dict_retraso_po = {}
+for index, row in df_retraso_po.iterrows():
+    clave = row[0]
+    valores = [row[2], row[3], row[4], row[5]]
+    dict_retraso_po[clave] = valores
+dict_retraso_po2 = {}
+for index, row in df_retraso_po.iterrows():
+    clave = row[6]
+    valores = [row[2], row[3], row[4], row[5]]
+    dict_retraso_po[clave] = valores
+
+df_coberturas.iloc[:,0] = df_coberturas.iloc[:,0].astype(str)
+df_coberturas.iloc[:,1] = df_coberturas.iloc[:,1].astype(str)
+# Preguntar el último día de análisis de fill rate y asignarlo a una variable
+#ultimo_diaFR = input("¿Cuál es el último día de análisis de fill rate? formato: dd/mm/aaaa ")
+ultimo_diaFR= '09/05/2023'
+ultimo_diaFR = pd.to_datetime(ultimo_diaFR, format='%d/%m/%Y')
+df_coberturas["PED/POS"] = df_coberturas.iloc[:,0] + df_coberturas.iloc[:,1]
+df_coberturas['Elem. Cobertura'] = df_coberturas['Elem. Cobertura'].fillna(0).astype(float).map('{:.0f}'.format)
+df_coberturas['Concatenar'] = df_coberturas.apply(lambda row: "" if pd.isna(row["Elem. Cobertura"]) else row["Elem. Cobertura"] if row["Descrip. breve"] == "Solicitud de pedido" else str(row["Elem. Cobertura"]) + str(row["Pos. Elem. Cobertura"]), axis=1)
+df_coberturas['Concatenar']  = df_coberturas['Concatenar'] .astype(str)
+fecha = pd.to_datetime(df_coberturas.iloc[0]["Fecha creación Cob."], format='%Y-%m-%d %H:%M:%S')# Le cambiamos el formato a el que nos interesa
+valor_busqueda = fecha.strftime('%d/%m/%Y')
+
+def buscar_retraso(row):
+    if row['Concatenar'] in dict_retraso_po:
+        if row[5] == 'VERDADERO':
+            if ultimo_diaFR - dict_retraso_po[row['Concatenar']][4] > 20:
+                return 'supply chain performance'
+            else:
+                return ''
+    elif ultimo_diaFR in dict_retraso_po and ultimo_diaFR - dict_retraso_po[row['Concatenar']][4] > df_coberturas.loc[row.name, 'TGR'] * 1.1:
+        return 'supply chain performance'
+
+# Utilizamos la función merge de pandas para obtener la columna F de la hoja 'Retraso PO'
+busqueda = pd.merge(df_coberturas[["Concatenar"]], df_retraso_po[["Sol.pedido", "Fe.sol.", "Identificación solped sin pedido"]], left_on="Concatenar", right_on="Sol.pedido")
+fecha = pd.to_datetime(busqueda.iloc[0]["Fe.sol."], format='%Y-%m-%d %H:%M:%S')# Le cambiamos el formato a el que nos interesa
+valor_busqueda = fecha.strftime('%d/%m/%Y')
+
+duracion_en_dias = (ultimo_diaFR - fecha).days
+df_coberturas['Retraso'] = np.where(valor_busqueda == "VERDADERO",
+np.where(duracion_en_dias > 20,
+ "supply chain performance", ""),
+np.where(duracion_en_dias > df_coberturas["TGR"] * 1.1,
+ "supply chain performance", ""))
+dictCob= df_coberturas.set_index('Concatenar')['Fecha creación Cob.'].to_dict()
+
+# ROTURAS //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+df_roturas["Concatenar"] = df_roturas.iloc[:,0].astype(str) + df_roturas.iloc[:,1].astype(str)
+dictRotura = df_roturas.set_index('Concatenar')['Rotura'].to_dict()
+
+# ENTREGAS //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+df_entregas["PED/POS"] = df_entregas.iloc[:,2].astype(str) + df_entregas.iloc[:,3].astype(str)
+
+# MTS/MTO  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+df_mtsmto["Concatenar"] = df_mtsmto.iloc[:,0].astype(str) + df_mtsmto.iloc[:,1].astype(str)
+dictMTSMTO = df_mtsmto.set_index('PART')['MTS/MTO'].to_dict()
+
+# MTSdesalineados  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+dictMTSdesa = df_mtsdesa.set_index('P - Material')['Causa'].to_dict()
+
+# Supplier  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+dictSupplier = df_supplier.set_index('PN')['Proveedor'].to_dict()
+
+# Categorias  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+# Cargamos los diccionarios que usaremos
+dictGreenAircraft = df_categorias.set_index('PN')['MRTT'].to_dict()
+dictLicencia = df_categorias.set_index('Part')['Lic'].to_dict()
+dictPEP = df_categorias.set_index('ELEMENTO PEP')['STOCK TYPE'].to_dict()
+dictMOI = df_categorias.set_index('PNR M')['MOI'].to_dict()
+dictSB = df_categorias.set_index('Boletín de servicio')['Tipo'].to_dict()
+dictITY = df_categorias.set_index('PNR I')['ITY'].to_dict()
+dictMotPed = df_categorias.set_index('Codigo')['MotPed'].to_dict()
+dictPedEx = df_categorias.set_index('COD')['Ped ex'].to_dict()
+dictTipoPed = df_categorias.set_index('codped')['tipoped'].to_dict()
+
+# LTA, MRTT y A400M   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#LTA
+df_LTA=df_LTA.loc[df_LTA['Planta'] == '1037']
+df_LTA.loc[:,"Concatenar"] = df_LTA.iloc[:,0].astype(str) + df_LTA.iloc[:,1].astype(str)
+columnas = list(df_LTA.columns)
+columnas.remove("Concatenar")
+columnas.insert(2, "Concatenar")
+df_LTA = df_LTA.reindex(columns=columnas)
+df_LTA= df_LTA.drop(['Planta'], axis=1)
+
+#MRTT
+df_MRTT=df_MRTT.loc[df_MRTT['Planta'] == '1037']
+df_MRTT["Concatenar"] = df_MRTT.iloc[:,0].astype(str) + df_MRTT.iloc[:,1].astype(str)
+columnas = list(df_MRTT.columns)
+columnas.remove("Concatenar")
+columnas.insert(2, "Concatenar")
+df_MRTT = df_MRTT.reindex(columns=columnas)
+df_MRTT= df_MRTT.drop(['Planta'], axis=1)
+#A400M
+df_A400M=df_A400M.loc[df_A400M['Planta'] == '1037']
+df_A400M["Concatenar"] = df_A400M.iloc[:,0].astype(str) + df_A400M.iloc[:,1].astype(str)
+columnas = list(df_A400M.columns)
+columnas.remove("Concatenar")
+columnas.insert(2, "Concatenar")
+df_A400M = df_A400M.reindex(columns=columnas)
+df_A400M= df_A400M.drop(['Planta'], axis=1)
+
+columnas = ['Fecha de creación pedido', 'Fecha última modificación pos.', 'Fecha de entrega', 'Fecha Desbloqueo Entrega', 'FDD/PLTD', 'FDD Manual', 'RDD', 'Fecha de Alta de Posición']
+# Bucle para formatear cada columna
+for col in columnas:
+    # Convierte la columna a objetos de fecha y hora
+    df_LTA[col] = pd.to_datetime(df_LTA[col])
+    df_MRTT[col] = pd.to_datetime(df_MRTT[col])
+    df_A400M[col] = pd.to_datetime(df_A400M[col])
+    # Da formato a la columna
+    df_LTA[col] = df_LTA[col].dt.strftime('%d/%m/%Y')
+    df_MRTT[col] = df_MRTT[col].dt.strftime('%d/%m/%Y')
+    df_A400M[col] = df_A400M[col].dt.strftime('%d/%m/%Y')
+
+# Empezamos a calcular cada variable del Fill rate ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+supplier = []  # Crear una lista vacía para almacenar los valores del diccionario
+Licencia = []
+Fill_Rate = []
+MTSMTO = []
+MotPedEx = []
+cantidad_despachada = []
+fill_rate_corregido = []
+FR1 = []
+FRA=[]
+cantidad_stock = []
+Excluidos=[]
+
+# Supplier y Licencia ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+for index, row in df_LTA.iterrows():
+    material = row['Material']
+    # Agregar valor a la lista 'supplier'
+    if material in dictSupplier:
+        supplier.append(dictSupplier[material])
+    else:
+        supplier.append(np.nan)  # Insertar un valor NaN si no existe en el diccionario
+
+    # Agregar valor a la lista 'Licencia'
+    if material in dictPML:
+        Licencia.append(dictPML[material]['PartCustom6'])
+    else:
+        Licencia.append('n')  # Escribir 'n' si el valor no existe en el diccionario
+
+df_LTA['Licencia'] = Licencia
+df_LTA['Supplier'] = supplier
+
+#Fill Rate - MTSMTO - MotPedEx ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+for index, row in df_LTA.iterrows():
+    material = row['Material']
+    Concatenar: object = row['Concatenar']
+    motivo_pedido = row['Motivo pedido']
+    elemento_pep = row['Elemento PEP']
+    descripcion_pnr = row['Descripción PNR']
+    licencia = row['Licencia']
+    # Agregar valor a la lista 'Fill Rate'
+    if Concatenar in dictRotura:
+        Fill_Rate.append(dictRotura[Concatenar])
+    else:
+        Fill_Rate.append('')  # Dejar el valor en blanco si no existe en el diccionario
+    # Agregar valor a la lista 'MTSMTO'
+    if material in dictMTSMTO:
+        MTSMTO.append(dictMTSMTO[material])
+    else:
+        MTSMTO.append('MTO')  # Escribir 'MTO' si el valor no existe en el diccionario
+
+    #Motivo pedidos excluidos
+    if material in dictSB:
+        MotPedEx.append(dictSB[material])
+    elif motivo_pedido in ['AOG', 'WPS'] or motivo_pedido.startswith('4') or motivo_pedido.startswith('4'):
+        MotPedEx.append('AOG')
+    elif motivo_pedido in ['32', '38', 32, 38]:
+        MotPedEx.append('IPL')
+    elif motivo_pedido == 'y/3@@' or motivo_pedido.startswith('M3'):
+        MotPedEx.append('C212')
+    elif motivo_pedido in ['SIM', 'IPS']:
+        MotPedEx.append('Simuladores')
+    elif motivo_pedido in ['39', 39, 'S8O']:
+        MotPedEx.append('Reserva')
+    elif (material is not None and ('SB' in material or 'S0*R0' in material)) or (elemento_pep is not None and 'SB' in elemento_pep)or (
+            descripcion_pnr in ["AIRCRAFT SERVICE BULLETIN KIT", "KIT BOLETÍN DE SERVICIO",
+                                "KIT BOLETIN DE SERVICIO DE AVION"]) or (material in dictSB and dictSB[material] == 'SB'):
+        MotPedEx.append('Boletines de Servicio')
+    elif licencia == 'y':
+        MotPedEx.append('Licencia')
+    else:
+        MotPedEx.append('')
+
+    cantidad_despachada.append(
+        round(abs(sum(df_entregas['Cantidad entrega'][df_entregas['PED/POS'] == Concatenar])), 3))
+    stock_sum = sum(df_coberturas['Ctd. cubierta'][
+                        (df_coberturas['Descrip. breve'] == 'STOCK') & (df_coberturas['Concatenar'] == Concatenar)])
+    lote_inspeccion_sum = sum(
+        df_coberturas['Ctd. cubierta'][(df_coberturas['Descrip. breve'] == 'Lote de inspección') & (
+                df_coberturas['Concatenar'] == Concatenar)])
+    cantidad_stock.append(round(stock_sum + lote_inspeccion_sum, 3))
+
+df_LTA['MTSMTO'] = MTSMTO
+df_LTA['Fill Rate'] = Fill_Rate
+df_LTA['MotPedEx'] = MotPedEx
+
+# Cantidad Despachada - Cantidad en Stock - Pedidos excluidos ///////////////////////////////////////////////////////////////////////////////////////////////////
+def PedidosEx(row):
+    condicion1 = (df_inc_consumo['Material'] == row['Material'])
+    suma1 = (1.3 * df_inc_consumo.loc[condicion1, 'Ctd.en UM entrada'].sum()) / 24
+    condicion2 = (df_inc_consumo['Material'] == row['Material']) & (
+            pd.to_datetime(df_inc_consumo['Fe.contabilización']) > pd.to_datetime('today') - pd.DateOffset(months=6))
+    suma2 = df_inc_consumo.loc[condicion2, 'Ctd.en UM entrada'].sum() / 6
+    if abs(suma1) < abs(suma2):
+        return 'Incremento'
+    else:
+        return ''
+
+# Añadir la columna al DataFrame
+df_LTA['Cantidad despachada'] = cantidad_despachada
+df_LTA['Cantidad Stock'] = cantidad_stock
+df_LTA['Pedidos Excluidos'] = df_LTA.apply(PedidosEx, axis=1)
+
+
+#FR1 - Fill Rate Corregido ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+for index, row in df_LTA.iterrows():
+    material = row['Material']
+    Concatenar: object = row['Concatenar']
+    motivo_pedido = row['Motivo pedido']
+    elemento_pep = row['Elemento PEP']
+    descripcion_pnr = row['Descripción PNR']
+    licencia = row['Licencia']
+    fill_rate = row['Fill Rate']
+    cantidad_stock = row['Cantidad Stock']
+    cantidad_despachada = row['Cantidad despachada']
+    cantidad_posicion = row['Cantidad posición']
+    cantidad_en_stock = row['Cantidad Stock']
+
+    if fill_rate == 'T' or (cantidad_stock + cantidad_despachada) >= cantidad_posicion:
+        FR1.append('T')
+    elif (cantidad_stock + cantidad_en_stock) > 0:
+        FR1.append('P')
+    else:
+        FR1.append('N')
+df_LTA['FR1'] = FR1
+
+for index, row in df_LTA.iterrows():
+    # Mot Ped Exc   ///////////////////////////////////////////////////////////////////////////////////
+    mot_ped_ex = row['MotPedEx']
+    pedidos_excluidos = row['Pedidos Excluidos']
+    fr1 = row['FR1']
+
+    if mot_ped_ex == "" and pedidos_excluidos == "":
+        fill_rate_corregido.append(fr1)
+    else:
+        fill_rate_corregido.append('')
+
+df_LTA['Fill Rate Corregido'] = fill_rate_corregido
+
+#Analisis Fill rate - CANDE /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+AFR = []
+CANDE = list(df_LTA['Cantidad despachada'])
+for i, row in df_LTA.iterrows():
+    material = row['Material']
+    elePEP = row['Elemento PEP']
+    MOPE = row['Pedidos Excluidos']
+    fAltaPos = row['Fecha de Alta de Posición']
+    fentrega = row['Fecha de entrega']
+    FCreaPed = row['Fecha de creación pedido']
+    CANSTOCKP = row['Cantidad Stock']
+    lic = row['Licencia']
+    # HCEN= row['Hits Central']
+
+    if elePEP is not None and (elePEP[3:4] == 'E' or elePEP[2:3] == 'E'):
+        AFR.append('Reparados')
+    elif MOPE == 'Boletines de Servicio':
+        AFR.append('Boletines de Servicio')
+    elif str(row['Solicitante'])[5:10] == '10820':
+        AFR.append('ADSMA')
+    elif material in dictPML:
+        Pedidoex2 = dictPML[material]['busqf']
+        if Pedidoex2 == 'CONSUMABLES & ROW MATERIAL':
+            AFR.append('Consumible')
+            CANDE[i] = dictPML[material]['busq']
+        else:
+            AFR.append('')
+    # elif (fAltaPos - HCEN) < (row['BE'] + 15):
+    #     AFR.append('Recently added to stock policy')
+    elif (pd.to_datetime(fentrega, format='%d/%m/%Y') - pd.to_datetime(FCreaPed, format='%d/%m/%Y')) < pd.Timedelta(
+            days=(CANSTOCKP + 15)) and lic == 'y':
+        AFR.append('Licencia')
+    else:
+        AFR.append('')
+df_LTA['Analisis Fill Rate'] = AFR
+
+# Fill Rate Final - Fill Rate Aplicabilidad - Excluidos ////////////////////////////////////////////////////////////////////////////////////////////////////
+FRF = []
+FRA = []
+Excluidos = []
+for index, row in df_LTA.iterrows():
+    FR1 = row['FR1']
+    MOPE = row['Pedidos Excluidos']
+
+    if FR1 != '':
+        FRF.append(FR1)
+    elif AFR != '':
+        if MOPE != '':
+            FRF.append(MOPE)
+        elif row['am'] != '':
+            FRF.append(row['am'])
+        else:
+            FRF.append('Others')
+    else:
+        FRF.append('')
+
+for index, row in df_LTA.iterrows():
+    fill_rate_corregido = row['Fill Rate Corregido']
+    MOPE = row['Pedidos Excluidos']
+
+    if fill_rate_corregido == 'T' or fill_rate_corregido == 'N' or fill_rate_corregido == 'P':
+        FRA.append('Rutina')
+        Excluidos.append('')
+    elif MOPE == 'AOG':
+        FRA.append('AOG')
+        Excluidos.append('')
+    else:
+        FRA.append('Others')
+        if AFR == 'Consumible':
+            Excluidos.append(AFR)
+        else:
+            Excluidos.append(FRF)
+
+df_LTA['FRF'] = FRF
+df_LTA['Excluidos'] = Excluidos
+df_LTA['CANDE'] = CANDE
+df_LTA['Fill Rate Aplicabilidad'] = FRA
+AFR = list(df_LTA['Analisis Fill Rate'])
+
+#Hits AOG - Hits Central ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+from datetime import datetime, timedelta
+import pandas as pd
+
+# Convierte la variable 'date' en un objeto de tipo 'datetime64[ns]'
+date = pd.to_datetime(datetime.now().date())
+
+# Convierte la columna 'Fecha de creación pedido' en objetos de fecha y hora
+df_LTA['Fecha de creación pedido'] = pd.to_datetime(df_LTA['Fecha de creación pedido'])
+
+# Calcula el número de hits AOG
+hits_aog = sum((df_LTA['Fill Rate Aplicabilidad'] == 'AOG') & (df_LTA['Fecha de creación pedido'] > (date - pd.Timedelta(days=365 * 3))))
+hits_central = sum((df_LTA['Fill Rate Aplicabilidad'] != 'AOG') & (df_LTA['Fill Rate Aplicabilidad'] != ''))
+
+df_LTA['Hits AOG'] = hits_aog
+df_LTA['Hits Central'] = hits_central
+
+
+# Procurable //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+procurable = []
+for material in df_LTA['Material']:
+    if material in dictPML:
+        procurable.append(dictPML[material]['busqL'])
+    else:
+        procurable.append('')
+df_LTA['Procurable'] = procurable
+
+FRF=[]
+for index, row in df_LTA.iterrows():
+
+    FR1 = row['FR1']
+    AFR = row['Analisis Fill Rate']
+    MOPE = row['Pedidos Excluidos']
+
+    if FR1 != '':
+        FRF.append(FR1)
+    elif AFR != '':
+        if MOPE != '':
+            FRF.append(MOPE)
+        elif row['am'] != '':
+            FRF.append(row['am'])
+        else:
+            FRF.append('Others')
+    else:
+        FRF.append('')
+
+df_LTA['FRF'] = FRF
+
+
+df_LTA['Fill Rate Aplicabilidad'] = FRA
+df_LTA['Excluidos'] = Excluidos
+
+
+Cruce_LT = []
+for material in df_LTA['Material']:
+    if material in dictMTSdesa:
+        Cruce_LT.append(dictMTSdesa[material])
+    else:
+        Cruce_LT.append('')
+df_LTA['Cruce LT'] = Cruce_LT
+
+# Convierte la columna 'Fe.contabilización' a un tipo de fecha y hora
+df_inc_consumo['Fe.contabilización'] = pd.to_datetime(df_inc_consumo['Fe.contabilización'], infer_datetime_format=True)
+
+def IncrementoTasaConsumo(row):
+    condicion1 = (df_inc_consumo['Material'] == row['Material'])
+    suma1 = (1.3 * df_inc_consumo.loc[condicion1, 'Ctd.en UM entrada'].sum()) / 24
+    condicion2 = (df_inc_consumo['Material'] == row['Material']) & (
+                df_inc_consumo['Fe.contabilización'] > pd.to_datetime('today') - pd.DateOffset(months=6))
+    suma2 = df_inc_consumo.loc[condicion2, 'Ctd.en UM entrada'].sum() / 6
+    if abs(suma1) < abs(suma2):
+        return 'Incremento'
+    else:
+        return ''
+
+df_LTA['Incremento Tasa de Consumo'] = df_LTA.apply(IncrementoTasaConsumo, axis=1)
+
+
+for i, row in df_LTA.iterrows():
+    material = row['Material']
+    PROC = row['Procurable']
+    MOPE = row['Pedidos Excluidos']
+    FRC = row['Fill Rate Corregido']
+    MTSO = dictMTSMTO.get(material, 'MTO')
+    AFR = row['Analisis Fill Rate']
+
+    if PROC == 'n':
+        AFR = 'Obsolete'
+    elif MTSO == 'MTO':
+        if AFR != 'Consumible':
+            AFR = 'Out of Stock Policy'
+        elif AFR != 'Consumible':
+            AFR = 'First Demand'
+    elif MOPE != '':
+        if row['Motivo pedido'] != 22:
+            AFR = FRC
+        else:
+            AFR = MOPE
+    elif FRC != 'T':
+        AFR = FRC
+
+df_LTA['AFR'] = AFR
+
+FRF = []
+for i, row in df_LTA.iterrows():
+    FR1 = row['FR1']
+    AFR = row['AFR']
+    MOPE = row['Pedidos Excluidos']
+
+    if FR1 != '':
+        FRF.append(FR1)
+    elif AFR != '':
+        if MOPE != '':
+            FRF.append(MOPE)
+        elif row['am'] != '':
+            FRF.append(row['am'])
+        else:
+            FRF.append('Others')
+    else:
+        FRF.append('')
+df_LTA['FRF'] = FRF
+
+FRA = []
+Excl = []
+for i, row in df_LTA.iterrows():
+    FRC = row['Fill Rate Corregido']
+    AFR = row['AFR']
+    FRF = row['FRF']
+    MOPE = row['Pedidos Excluidos']
+
+    if FRC == 'T' or FRC == 'N' or FRC == 'P':
+        FRA.append('Rutina')
+        Excl.append('')
+    elif MOPE == 'AOG':
+        FRA.append('AOG')
+        Excl.append('')
+    else:
+        FRA.append('Others')
+        if AFR == 'Consumible':
+            Excl.append(AFR)
+        else:
+            Excl.append(FRF)
+df_LTA['FRA'] = FRA
+df_LTA['Excl'] = Excl
+
+seismeses = (pd.to_datetime('today') - pd.DateOffset(months=6)).strftime('%m/%d/%y')
+venticuatromeses = (pd.to_datetime('today') - pd.DateOffset(months=24)).strftime('%m/%d/%y')
+condicion1 = (df_MB51['Lote'] == material) & (df_MB51['Clase de movimiento'] > seismeses)
+condicion2 = (df_MB51['Lote'] == material) & (df_MB51['Clase de movimiento'] > venticuatromeses)
+cuenta6 = condicion1.sum()
+cuenta24 = condicion2.sum()
+suma6 = abs(df_MB51.loc[condicion1, 'Stock especial'].sum())
+suma24 = abs(df_MB51.loc[condicion2, 'Stock especial'].sum())
+media6 = suma6 / cuenta6
+media24 = suma24 / cuenta24
+porcentaje = media6 / media24
+fsolped = dictCob[Concatenar]['Fecha creación Cob.']
+if fsolped != '':
+    ff = (pd.to_datetime('today') - fsolped).days
+TGRinc = dictTGR['TiempoGlobalReaprov']
+retro = dictPEP[elePEP]
+
+tDem = []
+for i, row in df_LTA.iterrows():
+    MOPE = row['Pedidos Excluidos']
+    Pedidoex = row['Pedidoex']
+    FRF = row['FRF']
+    AFR = row['AFR']
+    MotPed = row['MotPed']
+
+
+    if MOPE != '' or Pedidoex != '' or FRF == 'Portugal' or AFR == 'Consumible':
+        tDem.append('')
+    elif MotPed == '33' or MotPed == '34' or MotPed == 'FSI' or MotPed == 'PBQ':
+        tDem.append('FREE DEMAND')
+    elif MotPed == '36' or MotPed == 'ZMR':
+        tDem.append('MRO')
+    elif MotPed == 'ZFI':
+        tDem.append('FISS')
+    else:
+        tDem.append('')
+df_LTA['tDem'] = tDem
+
+Comen = []
+for i, row in df_LTA.iterrows():
+    material = row['Material']
+    conca = row['Concatenar']
+    FRC = row['FRC']
+    CRLT = row['CRLT']
+    tDem = row['tDem']
+    PROC = row['Procurable']
+    MTSO = dictMTSMTO[material]
+    AFR = row['AFR']
+    INC = row['Incremento']
+    porcentaje = row['porcentaje']
+    ff = row['ff']
+    TGR = row['TGR']
+
+    if conca in dictCob:
+        if FRC == 'N' or FRC == 'P':
+            if CRLT == 'PROP PARTS -LEAD TIME NOT UPDATED':
+                Comen.append(tDem)
+            elif CRLT == 'CONTRACTUAL LEAD TIME NOT UPDATED':
+                Comen.append(tDem)
+            elif PROC == 'n':
+                Comen.append('Obsolete')
+            elif MTSO == 'MTO':
+                if AFR == 'Out of stock policy':
+                    Comen.append('Out of stock policy')
+                elif INC == 'Incremento':
+                    Comen.append('Consumption Increase')
+                elif porcentaje < 0.3:
+                    Comen.append('Consumption Increase')
+                elif ff > TGR:
+                    Comen.append('Low Supplier Performance')
+                else:
+                    Comen.append('Others')
+            else:
+                Comen.append('')
+        else:
+            Comen.append('')
+    else:
+        Comen.append('')
+df_LTA['Comen'] = Comen
+
+
+#Exportamos dataframes ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+# Crear un objeto ExcelWriter
+writer = pd.ExcelWriter('nombre_del_archivo.xlsx', engine='xlsxwriter')
+# Lista de dataframes
+dfs = [df_LTA, df_MRTT, df_A400M, df_coberturas, df_roturas, df_retraso_po, df_TGR, df_entregas, df_mtsmto, df_mtsdesa, df_categorias]
+# Lista de nombres para las hojas
+sheet_names = ["LTA", "MRTT", "A400M", "Coberturas", "Roturas", "Retraso PO", "TGR", "Entregas", "MTS-MTO", "MTS Desalineados", "Categorias"]
+# Exportar cada DataFrame a una hoja separada con el nombre correspondiente
+for df, sheet_name in zip(dfs, sheet_names):
+    df.to_excel(writer, sheet_name=sheet_name, index=False)
+    # Guardar el archivo de Excel
+writer.save()
