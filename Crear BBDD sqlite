@@ -1,0 +1,63 @@
+import os
+import sqlite3
+import pandas as pd
+from tqdm import tqdm
+
+# CARGA DE ARCHIVOS /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+# Obtener la ruta actual
+proyecto_path = os.getcwd()
+# Obtener la ruta de la carpeta "transacciones" dentro de la carpeta del proyecto
+transacciones_path = os.path.join(proyecto_path, "transacciones")
+# Lista de nombres de archivo
+file_names = ["Coberturas.xlsx", "Roturas.xlsx", "Solicitudes.xlsx", "TGR.xlsx", "Entregas.xlsx", "MTSMTO.xlsx", "MTSdesalineados.xlsx",
+              "IPCSDD_PART_MASTER.xlsx", 'supplier.xlsx',]
+# Crear una conexión a la base de datos SQLite
+conn = sqlite3.connect('transacciones/Transacciones.db')
+
+# Cargar los archivos de Excel como dataframes y guardarlos en la base de datos SQLite
+
+for file_name in tqdm(file_names):
+    file_path = os.path.join(transacciones_path, file_name)
+    df = pd.read_excel(file_path)
+    table_name = os.path.splitext(file_name)[0]
+    df.to_sql(table_name, conn, if_exists='replace', index=False)
+
+# Cargar los dataframes df_inc_consumo, df_MB51 y df_PartMaster desde archivos Excel
+file_nameINC="Incremento Consumo.xlsx"
+file_pathINC = os.path.join(transacciones_path, file_nameINC)
+df_inc_consumo = pd.read_excel(file_pathINC, usecols=['Material', 'Ctd.en UM entrada', 'Fe.contabilización'])
+
+file_nameMB51 = "MB51.xlsx"
+file_pathMB51 = os.path.join(transacciones_path, file_nameMB51)
+df_MB51 = pd.read_excel(file_pathMB51, usecols=['Material', 'Clase de movimiento', 'Lote', 'Stock especial'])
+
+file_pathPML= r'\\gfa60005\LOGISTIC\TASMT3-Planning and Demand Management\PLAN CAPACITACION_TASMT3\PLAN CAPACITACIÓN_RECURSOS\Datos utiles\PART MASTER\IPCSDD_PART_MASTER.xlsx'
+df_PartMaster = pd.read_excel(file_pathPML, usecols=['PartDescription','PartNumber', 'PartProcurable', 'PartCustom6', 'HostPartFamilyID'])
+
+# Guardar los dataframes df_inc_consumo, df_MB51 y df_PartMaster en la base de datos SQLite
+df_inc_consumo.to_sql('Incremento_Consumo', conn, if_exists='replace', index=False)
+df_MB51.to_sql('MB51', conn, if_exists='replace', index=False)
+df_PartMaster.to_sql('IPCSDD_PART_MASTER', conn, if_exists='replace', index=False)
+
+# Cerrar la conexión a la base de datos
+conn.close()
+
+# Crear una conexión a la base de datos SQLite
+conn = sqlite3.connect('transacciones/Transacciones.db')
+
+# Cargar los datos desde la base de datos SQLite en DataFrames
+df_LTA = pd.read_sql_query("SELECT * FROM ML", conn)
+df_MRTT = pd.read_sql_query("SELECT * FROM MRTT", conn)
+df_A400M = pd.read_sql_query("SELECT * FROM A400M", conn)
+df_coberturas = pd.read_sql_query("SELECT * FROM Coberturas", conn)
+df_roturas = pd.read_sql_query("SELECT * FROM Roturas", conn)
+df_retraso_po = pd.read_sql_query("SELECT * FROM Solicitudes", conn)
+df_TGR = pd.read_sql_query("SELECT * FROM TGR", conn)
+df_entregas = pd.read_sql_query("SELECT * FROM Entregas", conn)
+df_mtsmto= pd.read_sql_query("SELECT * FROM MTSMTO", conn)
+df_mtsdesa= pd.read_sql_query("SELECT * FROM MTSdesalineados", conn)
+df_PartMaster= pd.read_sql_query("SELECT * FROM IPCSDD_PART_MASTER", conn)
+df_supplier = pd.read_sql_query("SELECT * FROM supplier", conn)
+
+# Cerrar la conexión a la base de datos
+conn.close()
