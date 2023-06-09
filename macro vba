@@ -1,0 +1,480 @@
+Public Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal Milliseconds As LongPtr)
+
+
+Sub FillRateML()
+
+Application.EnableEvents = False
+ActiveSheet.DisplayPageBreaks = False
+Application.ScreenUpdating = False
+
+Call dicLOCAL(dicT1, dicT2, dicT3, dicT4, dicT5, dicT6, dicT7, dicT8, DICT9, dicT10, dicT11, dicT12, DICT14, dicTm, dictsb)
+Call dicexternal(DICT13, DICTPRO)
+
+
+'Timear una sección de código utilizar la función Timer en VBA
+Dim segundos1 As Single
+Dim segundos2 As Single
+Dim NumeroRandom As Integer
+segundos1 = Timer() / 60
+
+
+
+'Workbooks(origen).Activate
+With Sheets("M&L")
+    reg = Cells(Rows.count, "a").End(xlUp).Row
+    'Limpiamos datos anteriores en caso de haberlos
+    Range("ML[[Licencia]:[Columna1]]").ClearContents
+End With
+Sheets("M&L").Select
+
+Dim doc As Variant
+Dim pos As Variant
+Dim conca As Variant
+
+reg = Cells(Rows.count, "c").End(xlUp).Row
+
+For i = 4 To reg
+
+'Guardamos variables
+doc = Cells(i, "A")
+pos = Cells(i, "B")
+conca = doc & pos
+FCreaPed = Cells(i, "D")
+elePEP = Cells(i, "E")
+material = Cells(i, "H")
+DESCR = Cells(i, "j")
+MotPed = Cells(i, "AB")
+MotPedExc = MOPE
+mb51 = MB
+Pedidoex = ""
+lic = ""
+lic2 = ""
+filR = ""
+MTSO = ""
+MOPE = ""
+CANDE = ""
+CANST = ""
+FRC = ""
+AFR = ""
+FRF = ""
+FRA = ""
+Excl = ""
+Comen = ""
+tDem = ""
+MB = ""
+CRLT = ""
+INC = ""
+PROC = ""
+HAOG = ""
+HCEN = ""
+CANSTOCP = ""
+FINCO = ""
+TGRS = ""
+sbb = ""
+sbi = ""
+'-----------Empezamos con los campos formulados-----------------------------------
+
+'Supplier
+
+If DICTPRO.exists(material) = True Then
+    Cells(i, "k") = DICTPRO(material).p
+End If
+
+'Licencia
+If DICT13.exists(material) = True Then
+    lic = DICT13(material).busqR
+    If lic = "y" Then
+        lic2 = "Licencia"
+    End If
+Else
+    lic = "n"
+End If
+    
+'Busqueda Fill rate
+key1 = conca
+If dicT1.exists(key1) = True Then
+    filR = dicT1(conca).busquedaFR
+Else
+    filR = "N"
+End If
+
+'Busqueda MTS/MTO-------------------------------------------------------------------------------
+key2 = "%" & material
+If dicT2.exists(key2) = True Then
+    MTSO = dicT2("%" & material).busqMTS
+Else
+    MTSO = "MTO"
+End If
+
+'Motivos pedidos excluidos------------------------------------------------------------------------
+sbb = DICT13(material).busqf
+If dictsb.exists(material) = True Then
+    sbi = dictsb(material).SerB
+End If
+If MotPed = "AOG" Or MotPed = "WSP" Or Left(MotPed, 1) = "4" Then
+    MOPE = "AOG"
+ElseIf MotPed = "32" Or MotPed = "38" Then
+    MOPE = "IPL"
+ElseIf Left(doc, 2) = "M3" Or elePEP = "y/3@@" Then
+    MOPE = "C212"
+ElseIf MotPed = "IPS" Or MotPed = "SIM" Then
+    MOPE = "Simuladores"
+ElseIf MotPed = "39" Or MotPed = "S80" Then
+    MOPE = "Reserva"
+ElseIf sbb = "SBB" Or material Like "*SB*" Or material Like "*S0*R0*" Or _
+elePEP Like "*SB*" Or sbi = "SB" Or DESCR = "AIRCRAFT SERVICE BULLETIN KIT" Or _
+DESCR = "KIT BOLETÍN DE SERVICIO" Or DESCR = "KIT BOLETIN DE SERVICIO DE AVION" Then
+    AFR = "Boletines de Servicio"
+ElseIf lic2 = "Licencia" Then
+    MOPE = "Licencia"
+End If
+
+'Cantidad despachada
+CANDE = Round(Abs(Application.WorksheetFunction.SumIf(Sheets("RotEntRetr").ListObjects("Entregas").ListColumns(1).Range, _
+conca, Sheets("RotEntRetr").ListObjects("Entregas").ListColumns(3).Range)), 3)
+
+'Cantidad en Stock
+ CANST = Round(WorksheetFunction.SumIfs(Sheets("Coberturas").ListObjects("Coberturas").ListColumns(5).Range, _
+Sheets("Coberturas").ListObjects("Coberturas").ListColumns(6).Range, "STOCK", _
+Sheets("Coberturas").ListObjects("Coberturas").ListColumns(1).Range, conca) _
++ WorksheetFunction.SumIfs(Sheets("Coberturas").ListObjects("Coberturas").ListColumns(5).Range, _
+Sheets("Coberturas").ListObjects("Coberturas").ListColumns(6).Range, "Lote de inspección", _
+Sheets("Coberturas").ListObjects("Coberturas").ListColumns(1).Range, conca), 3)
+
+'FR1 - variable de transicion
+If filR = "T" Or (CANDE + CANST >= Cells(i, "l")) Then
+    FR1 = "T"
+ElseIf (CANDE + Cells(i, "AO") > 0) Then
+    FR1 = "P"
+Else
+    FR1 = "N"
+End If
+
+'Fill Rate Corregido
+If MOPE = "" Then
+    If Cells(i, "AM") = "" Then
+        FRC = FR1
+    End If
+End If
+
+sbb = DICT13(material).busqf
+If dictsb.exists(material) = True Then
+    sbi = dictsb(material).SerB
+End If
+'Analisis FR
+If Mid(elePEP, 4, 1) = "E" Or Mid(elePEP, 3, 1) = "E" Then
+    AFR = "Reparados"
+ElseIf MOPE = "Boletines de Servicio" Then
+    AFR = "Boletines de Servicio"
+ElseIf Mid(Cells(i, "S"), 6, 5) = "10820" Then
+    AFR = "ADSMA"
+ElseIf DICT13.exists(material) = True Then
+        Pedidoex2 = DICT13(material).busqf
+        If Pedidoex2 = "CONSUMABLES & ROW MATERIAL" Then
+            AFR = "Consumible"
+        End If
+ElseIf ((fAltaPos - HCEN) < (Cells(i, "BE") + 15)) Then
+    AFR = "Recently added to stock policy"
+ElseIf ((fentrega - FCreaPed) < (CANSTOCKP + 15)) And lic = "y" Then
+    AFR = "Licencia"
+
+End If
+
+If Not IsError(busquedaMTS) Then
+        If result = "CONSUMABLES & ROW MATERIAL" Then
+            CANDE = DICT13(material).busq
+        End If
+End If
+
+'----Vamos a calcular ahora la parte azul que es previa a los campos que nos quedan------
+
+'MB51
+'key = "%" & material
+If dicT3.exists(material) = True Then
+    MB = dicT3(material).busqMB51
+    
+End If
+
+'CruceLT
+key4 = "%" & material
+If dicT4.exists(key4) = True Then
+CRLT = dicT4(key4).busqCruce
+End If
+
+'Incremento tasa de consumo
+cond1 = Abs(Application.WorksheetFunction.SumIf(Sheets("IncrConsumo").ListObjects("IncrConsumo").ListColumns(10).Range, _
+material, Sheets("Incrconsumo").ListObjects("IncrConsumo").ListColumns(8).Range) / 24)
+
+Dim ranb
+Set rang = Sheets("Incrconsumo").ListObjects("IncrConsumo").ListColumns(10).Range
+Set rang2 = Sheets("Incrconsumo").ListObjects("IncrConsumo").ListColumns(8).Range
+Set rang3 = Sheets("Incrconsumo").ListObjects("IncrConsumo").ListColumns(2).Range
+
+cond2 = Abs(Application.WorksheetFunction.SumIfs(rang, rang2, material, rang3, ">" & (Month(Date - 180)) / 6))
+
+If cond1 < cond2 Then
+    tDem = "Incremento"
+End If
+
+'Procurable
+key13 = material
+If DICT13.exists(key13) = True Then
+    PROC = DICT13(key13).busqL
+End If
+
+'SDF - FALTA FORMULA
+
+    '----Volvemos a la parte central----
+
+'Pedidos excluidos - Variable intermedia
+key13 = material
+If Mid(elePEP, 4, 1) = "E" Or Mid(elePEP, 3, 1) = "E" Then
+    Pedidoex = "Reparados"
+ElseIf AFR = "Boletines de Servicio" Then
+    Pedidoex = "Boletines de Servicio"
+ElseIf Mid(Cells(i, "S"), 6, 5) = "10820" Then
+    Pedidoex = "ADSMA"
+ElseIf material Like "Z*" Or material Like "AIMS*" Or (elePEP Like "*Y/S*" And elePEP <> "Y/S19") Then
+    Pedidoex = "Consumible"
+ElseIf DICT13.exists(material) = True Then
+        Pedidoex2 = DICT13(material).busqf
+        If Pedidoex2 = "CONSUMABLES & ROW MATERIAL" Then
+            Pedidoex = "Consumible"
+        End If
+End If
+'Cells(I, "am") = Pedidoex
+
+
+'Fillrate analisis
+    If PROC = "n" Then
+    AFR = "Obsolete"
+ElseIf MTSO = "MTO" Then
+    If MB = material And AFR <> "Consumible" Then
+        AFR = "out of Stock Policy"
+    ElseIf AFR <> "Consumible" Then
+        AFR = "First demand"
+    End If
+ElseIf MOPE <> "" Then
+    If Cells(i, "AM") <> 22 Then
+        AFR = FRC
+    Else
+    AFR = MOPE
+    End If
+ElseIf FRC <> "T" Then
+        AFR = FRC
+End If
+    
+'Fill rate Final
+
+If FR1 <> "" Then
+    FRF = FR1
+
+ElseIf AFR <> "" Then
+    If MOPE <> "" Then
+        FRF = MOPE
+    ElseIf Cells(i, "am") <> "" Then
+        FRF = Cells(i, "am")
+    Else
+        FRF = "Others"
+    End If
+End If
+
+'Fill Rate Aplicabilidad
+If FRC = "T" Or FRC = "N" Or FRC = "P" Then
+    FRA = "Rutina"
+ElseIf MOPE = "AOG" Then
+    FRA = "AOG"
+Else
+    FRA = "Others"
+End If
+    
+'Excluidos
+If FRA <> "Rutina" Then
+    Excl = FRF
+End If
+If AFR = "Consumible" Then
+    Excl = AFR
+End If
+
+
+'Guardamos variables
+doc = Cells(i, "A")
+pos = Cells(i, "B")
+conca = doc & pos
+material = Cells(i, "H")
+
+
+'Calculos previos comentarios
+On Error Resume Next
+seismeses = Format(DateAdd("m", -6, Now), "mm/dd/yy")
+venticuatromeses = Format(DateAdd("m", -24, Now), "mm/dd/yy")
+cuenta6 = WorksheetFunction.CountIfs(Sheets("MB51").Range("j:j"), material, Sheets("MB51").Range("b:b"), ">" & seismeses)
+cuenta24 = WorksheetFunction.CountIfs(Sheets("MB51").Range("j:j"), material, Sheets("MB51").Range("b:b"), ">" & venticuatromeses)
+suma6 = Abs(WorksheetFunction.SumIfs(Sheets("MB51").Range("h:h"), Sheets("MB51").Range("j:j"), material, Sheets("MB51").Range("b:b"), ">" & seismeses))
+suma24 = Abs(WorksheetFunction.SumIfs(Sheets("MB51").Range("h:h"), Sheets("MB51").Range("j:j"), material, Sheets("MB51").Range("b:b"), ">" & venticuatromeses))
+media6 = suma6 / cuenta6
+media24 = suma24 / cuenta24
+porcentaje = media6 / media24
+On Error GoTo -1
+fsolped = dicT5(conca).fsolped
+If Not fsolped = "" Then
+ff = Format(Now - fsolped, "dd/mm/yy")
+End If
+TGRinc = dicT10(material).busqtgr * 1.1
+
+Sleep 50
+
+retro = dicT12(elePEP).busqretro
+
+'Tipo Pedido Pedidoex <> ""
+If MOPE <> "" Or Pedidoex <> "" Or FRF = "Portugal" Or AFR = "Consumible" Then
+    tDem = ""
+ElseIf MotPed = "33" Or MotPed = "34" Or MotPed = "FSI" Or MotPed = "PBQ" Then
+    tDem = "FREE DEMAND"
+ElseIf MotPed = "36" Or MotPed = "ZMR" Then
+    tDem = "MRO"
+ElseIf MotPed = "ZFI" Then
+        tDem = "FISS"
+
+End If
+
+'Comentarios
+If dicT5.exists(conca) = True Then
+    If FRC = "N" Or FRC = "P" Then
+        If CRLT = "PROP PARTS -LEAD TIME NOT UPDATED" Then
+            Comen = tDem
+        ElseIf CRLT = "CONTRACTUAL LEAD TIME NOT UPDATED" Then
+            Comen = tDem
+        ElseIf PROC = "n" Then
+            Comen = "Obsolete"
+        ElseIf MTSO = "MTO" Then
+            If AFR = "Out of stock policy" Then
+                Comen = "Out of stock policy"
+            ElseIf INC = "Incremento" Then
+                Comen = "Consumption Increase"
+            ElseIf porcentaje < "0,3" Then
+                Comen = "Consumption Increase"
+            ElseIf ff > TGR Then
+                Comen = "Low Supplier Performance"
+            ElseIf Not IsError(busquedaCOM) Then
+                Comen = "Low Supplier Performance"
+            Else
+                Comen = "Others"
+            End If
+        End If
+    End If
+End If
+
+
+'TGR
+If dicT10.exists(material) = True Then
+    TGRS = dicT10(material).busqtgr
+End If
+
+
+'HITS AOG
+HITAOG = WorksheetFunction.CountIfs(Range("AS:AS"), "AOG", Range("E:E"), ">" & (Date - (365 * 3)))
+HAOG = HITAOG
+
+'HITS CENTRAL
+HITcentral = WorksheetFunction.CountIfs(Range("AS:AS"), "<>" & "AOG", Range("AS:AS"), "<>")
+HCEN = HITcentral
+
+'HITS GLOBAL
+'HITglobal = WorksheetFunction.CountIfs(Sheets("MB51").Range("A:A"), "1SG>*", Sheets("MB51").Range("b:b"), ">" & (Date - (365 * 3)))
+'Cells(i, "BE") = HITglobal
+'
+' Cells(i, "AO") = WorksheetFunction.SumIfs(Sheets("Coberturas").ListObjects("Coberturas").ListColumns(5).Range, _
+'Sheets("Coberturas").ListObjects("Coberturas").ListColumns(6).Range, "STOCK", _
+'Sheets("Coberturas").ListObjects("Coberturas").ListColumns(1).Range, conca) _
+'
+'
+'cond1 = Abs(Application.WorksheetFunction.SumIf(Sheets("IncrConsumo").ListObjects("IncrConsumo").ListColumns(21).Range, _
+'material, Sheets("Incrconsumo").ListObjects("IncrConsumo").ListColumns(18).Range) / 24)
+
+Dim arr(27) As Variant
+
+arr(0) = lic
+arr(1) = filR
+arr(2) = MTSO
+arr(3) = MOPE
+arr(4) = Pedidoex
+arr(5) = CANDE
+arr(6) = CANST
+arr(7) = FRC
+arr(8) = AFR
+arr(9) = FRF
+arr(10) = FRA
+arr(11) = Excl
+arr(12) = Comen
+arr(13) = tDem
+arr(14) = MB
+arr(15) = CRLT
+arr(16) = INC
+arr(17) = PROC
+arr(18) = ""
+arr(19) = ""
+arr(20) = HAOG
+arr(21) = HCEN
+arr(22) = ""
+arr(23) = CANSTOCP
+arr(24) = FINCO
+arr(25) = TGRS
+
+
+Range("AI" & i & ":BH" & i) = arr
+
+Next
+
+
+    Range("M:M,O:O,N:N").Select
+    Selection.Style = "Currency"
+    Columns("AD:AD").Select
+    Selection.NumberFormat = "@"
+    With Sheets("M&L")
+    .Range("P:P").Select
+    Selection.NumberFormat = "m/d/yyyy"
+    .Range("D:D").Select
+    Selection.NumberFormat = "m/d/yyyy"
+    .Range("G:G").Select
+    Selection.NumberFormat = "m/d/yyyy"
+    .Range("AE:AH").Select
+    Selection.NumberFormat = "m/d/yyyy"
+    End With
+
+
+Application.ScreenUpdating = True
+Application.EnableEvents = True
+ActiveSheet.DisplayPageBreaks = True
+
+segundos2 = Timer() / 60
+'Mostrar la diferencia de tiempos y el número random en un MsgBox
+MsgBox ("Tiempo de ejecucion:" & vbNewLine & segundos2 - segundos1 & "Min")
+
+
+
+
+End Sub
+
+
+
+Function IsWorkBookOpen(PM As String) As Boolean
+    Dim xWb As Workbook
+    On Error Resume Next
+    Set xWb = Application.Workbooks.item(PM)
+    IsWorkBookOpen = (Not xWb Is Nothing)
+End Function
+Function IsWorkBookOpenpro(Pro As String) As Boolean
+    Dim xWbpro As Workbook
+    On Error Resume Next
+    Set xWbpro = Application.Workbooks.item(Pro)
+    IsWorkBookOpenpro = (Not xWbpro Is Nothing)
+End Function
+
+
+
+
+
+
+
+
